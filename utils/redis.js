@@ -1,63 +1,51 @@
 import { promisify } from 'util';
 import { createClient } from 'redis';
-
 /**
- * Representation of a Redis client.
+ * A redis client class
  */
 class RedisClient {
-  /**
-   * Creates RedisClient instance
-   */
   constructor() {
     this.client = createClient();
-    this.isClientConnected = true;
+    this.connected = true;
     this.client.on('error', (err) => {
-      console.error('Failed to connect:', err.message || err.toString());
-      this.isClientConnected = false;
-    });
-    this.client.on('connect', () => {
-      this.isClientConnected = true;
+      console.log('Redis connection error:', err.message || err.toString());
+      this.connected = false;
     });
   }
-
   /**
-   * Checks if client's connection to the Redis server
-   * @returns {boolean}
+   * checks is the server is connected
+   * @returns boolen
    */
+
   isAlive() {
-    return this.isClientConnected;
+    return this.connected;
   }
-
-  /**
-   * Retrieves the value of a given key.
-   * @param {String} key The key of the item to retrieve.
-   * @returns promise
-   */
+/**
+ * Retrives values with a given key
+ * @param {*} key, key associated with the variable
+ * @returns 
+ */
   async get(key) {
-    return promisify(this.client.GET).bind(this.client)(key);
+    const GET = promisify(this.client.GET);
+    return GET.call(this.client, key);
+  }
+/**
+ * sets the key to the varible
+ * @param {*} key key associated with the variable
+ * @param {*} value value associated with the key
+ * @param {*} expires expiration date
+ */
+  async set(key, value, expires) {
+    const SETEX = promisify(this.client.SETEX);
+    await SETEX.call(this.client, key, expires, value);
   }
 
-  /**
-   * Saves a key and its value with an expiration time.
-   * @param {String} key of the item to save.
-   * @param {String | Number | Boolean} value item to store
-   * @param {Number} duration  expiration time of the item
-   * @returns null
-   */
-  async set(key, value, duration) {
-    await promisify(this.client.SETEX)
-      .bind(this.client)(key, duration, value);
-  }
-
-  /**
-   * Deletes the value of a given key
-   * @param {String} key of the item to delete
-   * @returns null}
-   */
   async del(key) {
-    await promisify(this.client.DEL).bind(this.client)(key);
+    const DEL = promisify(this.client.DEL);
+    return DEL.call(this.client, key);
   }
 }
 
-export const redisClient = new RedisClient();
-export default redisClient;
+const redisClient = new RedisClient();
+
+module.exports = redisClient;
