@@ -1,71 +1,69 @@
-/**
- * Worker that processes the fileQueue
- * It fecthes the file from the mongodb database
- */
-import fs from 'fs';
-import Queue from 'bull';
 import { ObjectId } from 'mongodb';
+import { dbClient } from './utils/db';
+import Bull from 'bull';
 import imageThumbnail from 'image-thumbnail';
-import dbClient from './utils/db';
+import { promises as fs } from 'fs';
 
-const fileQueue = new Queue('fileQueue');
-const userQueue = new Queue('userQueue');
 
-async function thumbnail(path, width) {
-  try {
-    const newPath = `${path}_${width}`;
-    const thumbnail = await imageThumbnail(path, { width });
-    fs.writeFileSync(newPath, thumbnail);
-    return Promise.resolve(width);
-  } catch (error) {
-    console.log(error);
-    return Promise.reject(width);
-  }
-}
-
-async function unlink(path, widths) {
-  for (const width of widths) {
-    fs.unlink(`${path}_${width.value}`, (err) => {
-      if (err) console.log(`Error encountered while removing: ${path}_${width.value}`);
-    });
-  }
-}
-
-fileQueue.process((job, done) => {
-  const { userId, fileId } = job.data;
-  if (userId === undefined) done(new Error('Missing userId'));
-  if (fileId === undefined) done(new Error('Missing fileId'));
-  dbClient.findOne('files', { _id: ObjectId(fileId), userId: ObjectId(userId) })
-    .then((file) => {
-      if (!file) throw new Error('File not found');
-      const path = file.localPath;
-      Promise.allSettled([thumbnail(path, 500), thumbnail(path, 250), thumbnail(path, 100)])
-        .then((results) => {
-          const fails = results.filter((r) => r.status === 'rejected');
-          if (fails.length > 0) {
-            const success = results.filter((r) => r.status === 'fulfilled');
-            unlink(path, success);
-            done(new Error('Could not create thumbnails successfully!'));
-          }
-          console.log('All thumbnails created!');
-          done();
-        });
-    })
-    .catch((err) => {
-      console.log(err);
-      done(err);
-    });
-});
+// Create job queues for file and user processing
+const fileQueue = new Bull('fileQueue');
+const userQueue = new Bull('userQueue');
 
 userQueue.process(async (job, done) => {
   const { userId } = job.data;
-  try {
-    if (userId === undefined) throw new Error('Missing UserId');
-    const user = await dbClient.findOne('users', { _id: ObjectId(userId) });
-    if (!user) throw new Error('User not found');
-    console.log(`Welome ${user.email}`);
-    done();
-  } catch (error) {
-    done(error);
+  if (!userId) {
+    done(new Error('Missing userId'));
   }
+
+  const user = await dbClient.db.collection('users')
+    .findOne({ _id: new ObjectId(userId) });
+
+  if (!user) {
+    done(new Error('User not found'));
+  }
+
+  console.log(`Welcome ${user.email}!`);
 });
+
+fileQ.process(async (job, done) => {
+  const { userId, fileId } = job.data;
+
+  if (!fileId) {
+    done(new Error('Missing fileId'));
+  }
+
+  if (!userId) {
+    done(new Error('Missing userId'));
+  }
+
+  const file = await dbClient.db.collection('files').findOne({
+    _id: new ObjectId(fileId),
+    userId: new ObjectId(userId),
+  });
+
+  if (!file) {
+    done(new Error('File not found'));
+  }
+
+  if (file.type !== 'image') {
+    done(new Error('File not an image'));
+  }
+
+  const originalPath = file.localPath;
+
+  const sizes = [500, 250, 100];
+  const promises = sizes.map(async (size) => {
+    const thumbPath = `${originalPath}_${size}`;
+
+    try {
+      const thumbBuffer = await imageThumbnail(fs.createReadStream(originalPath), { width: size });
+      await fs.writeFile(thumbPath, thumbBuffer);
+    } catch (err) {
+      console.error(`Error getting size thumbnail of ${size}: ${err}`);
+    }
+  });
+
+  await Promise.all(promises);
+});
+
+console.log('running...');

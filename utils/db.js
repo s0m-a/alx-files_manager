@@ -1,42 +1,60 @@
 /**
- * Mongo client connsction
+ * Mongodb client connection
  */
-import { MongoClient, ObjectId } from 'mongodb';
+import { MongoClient } from 'mongodb';
+import { env } from 'process';
+
+const DB_HOST = env.DB_HOST || 'localhost';
+const DB_PORT = env.DB_PORT || '27017';
+const DB_DATABASE = env.DB_DATABASE || 'files_manager';
+const mongoUrl = `mongodb://${DB_HOST}:${DB_PORT}`;
 
 class DBClient {
+    /**
+     * creates a mongodb instance
+     */
   constructor() {
-    const DB_PORT = process.env.DB_PORT || '27017';
-    const DB_HOST = process.env.DB_HOST || 'localhost';
-    const DB_DATABASE = process.env.DB_DATABASE || 'files_manager';
-    const DB_URL = `mongodb://${DB_HOST}:${DB_PORT}`;
-    this._client = new MongoClient(DB_URL);
-    this.connected = false;
-    (async () => {
-      try {
-        await this._client.connect();
-        this.connected = true;
-        this._db = this._client.db(DB_DATABASE);
-        await this._db.collection('users').createIndex({ email: 1 }, { unique: true });
-      } catch (error) {
-        console.log(error);
-      }
-    })();
+    this.client = new MongoClient(mongoUrl, {
+      useNewUrlParser: true, useUnifiedTopology: true,
+    });
+
+    this.dbName = DB_DATABASE;
+    this.isConnected = false;
+
+    this.client.connect().then(() => {
+      this.isConnected = true;
+      this.db = this.client.db(this.dbName);
+    }).catch((err) => {
+      console.error('Redis client not connected:', err.message || err.toString());
+    });
   }
 
+  /**
+   * checks if the server is connected
+   * @returns boolean
+   */
   isAlive() {
-    return this.connected;
+    return this.isConnected;
   }
 
-  async nbUsers(arg= {}) {
-    return this._db.collection('users').countDocuments(arg);
+  /**
+   * Counts users in the collection
+   * @returns a promise
+   */
+  async nbUsers() {
+    if (!this.isAlive()) return 0;
+    return this.db.collection('users').countDocuments();
   }
 
-  async nbFiles(arg = {}) {
-    return this._db.collection('files').countDocuments(arg);
+  /**
+   * counts files in collection
+   * @returns a promise
+   */
+  async nbFiles() {
+    if (!this.isAlive()) return 0;
+    return this.db.collection('files').countDocuments();
   }
-
 }
 
-const dbClient = new DBClient();
-
-module.exports = dbClient;
+export const dbClient = new DBClient();
+export default dbClient;
